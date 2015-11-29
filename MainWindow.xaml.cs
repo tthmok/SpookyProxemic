@@ -26,6 +26,7 @@ namespace Spooky
     {
         MediaPlayer player;
         string bump_file = "Music/Bump_in_the_Night_Supernatural_Haunting.mp3";
+        string static_file = "Music/Record_Player_Static.mp3";
 
         /// <summary>
         /// Thickness of face bounding box and face points
@@ -239,7 +240,7 @@ namespace Spooky
             this.DataContext = this;
 
             // setup default music
-            Uri uri = new Uri(@bump_file, UriKind.Relative);
+            Uri uri = new Uri(@static_file, UriKind.Relative);
             player = new MediaPlayer();
             player.Open(uri);
             player.Play();

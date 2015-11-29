@@ -231,6 +231,9 @@
     <Content Include="Music\Bump_in_the_Night_Supernatural_Haunting.mp3">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
+    <Content Include="Music\Record_Player_Static.mp3">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
     <None Include="NuiDatabase\Expression\NuiExpressionModelManifest.txt">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
