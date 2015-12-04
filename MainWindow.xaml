@@ -3,29 +3,37 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:gif="http://wpfanimatedgif.codeplex.com"
         xmlns:local="clr-namespace:Spooky"
         mc:Ignorable="d"
-        Title="MainWindow" Height="350" Width="525"
+        Title="MainWindow" Height="780" Width="1024"
         Loaded="MainWindow_Loaded"
-        Closing="MainWindow_Closing">
+        Closing="MainWindow_Closing" ResizeMode="NoResize">
     <Window.Resources>
         <SolidColorBrush x:Key="MediumGreyBrush" Color="#ff6e6e6e" />
         <SolidColorBrush x:Key="KinectPurpleBrush" Color="#ff52318f" />
         <SolidColorBrush x:Key="KinectBlueBrush" Color="#ff00BCF2" />
     </Window.Resources>
-    <Grid Margin="10 0 10 0">
-        <Grid.RowDefinitions>
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="*" />
-            <RowDefinition Height="Auto" />
-        </Grid.RowDefinitions>
+    <Canvas>
 
-        <Viewbox Grid.Row="1" HorizontalAlignment="Center">
-            <Image Source="{Binding ImageSource}" Stretch="UniformToFill" />
+        <Viewbox HorizontalAlignment="Center" Width="1024" Height="780">
+            <Image Source="{Binding ImageSource}" Width="1024" Height="780" />
         </Viewbox>
 
-        <StatusBar Grid.Row="2" HorizontalAlignment="Stretch" Name="statusBar" VerticalAlignment="Bottom" Background="White" Foreground="{StaticResource MediumGreyBrush}">
-            <StatusBarItem Content="{Binding StatusText}" />
-        </StatusBar>
-    </Grid>
+        <Image x:Name="staticGif" gif:ImageBehavior.AnimatedSource="Images/static_1.gif" Width="1024" Height="780" />
+
+        <Slider Name="volumeSlider" Canvas.Left="70" Canvas.Top="701" Height="40" Width="870" BorderThickness="0" LargeChange="0" Cursor="Hand" RenderTransformOrigin="0.5,0.5" Background="#FF686868">
+            <Slider.RenderTransform>
+                <TransformGroup>
+                    <ScaleTransform/>
+                    <SkewTransform/>
+                    <RotateTransform/>
+                    <TranslateTransform X="1" Y="1"/>
+                </TransformGroup>
+            </Slider.RenderTransform>
+        </Slider>
+        <Image x:Name="magicEye" Height="187" Canvas.Top="509" Width="274" Source="Images/magic_eye_bird.jpg" Opacity="0.05"/>
+        <Ellipse x:Name="faceIndicator" Fill="#FFFFA200" Height="70" Canvas.Left="938" Stroke="Black" Canvas.Top="10" Width="70"/>
+        <Image x:Name="screamerImage" Height="696" Width="1018" Source="Images/screamer.jpg" Opacity="0"/>
+    </Canvas>
 </Window>

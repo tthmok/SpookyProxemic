@@ -16,6 +16,7 @@ using Microsoft.Kinect;
 using Microsoft.Kinect.Face;
 using System.ComponentModel;
 using System.Globalization;
+using System.Diagnostics;
 
 namespace Spooky
 {
@@ -27,6 +28,15 @@ namespace Spooky
         MediaPlayer player;
         string bump_file = "Music/Bump_in_the_Night_Supernatural_Haunting.mp3";
         string static_file = "Music/Record_Player_Static.mp3";
+        string screamer_file = "Music/inhale_scream.mp3";
+        
+        private Uri screamUri;
+        MediaPlayer screamPlayer;
+
+        /// <summary>
+        /// Constant for clamping Z values of camera space points from being negative
+        /// </summary>
+        private const float InferredZPositionClamp = 0.1f;
 
         /// <summary>
         /// Thickness of face bounding box and face points
@@ -75,15 +85,15 @@ namespace Spooky
         private Point textLayoutFaceNotTracked = new Point(10.0, 10.0);
 
         /// <summary>
-        /// Drawing group for body rendering output
+        /// Reader for color frames
         /// </summary>
-        private DrawingGroup drawingGroup;
+        private ColorFrameReader colorFrameReader = null;
 
         /// <summary>
-        /// Drawing image that we will display
+        /// Bitmap to display
         /// </summary>
-        private DrawingImage imageSource;
-
+        private WriteableBitmap colorBitmap = null;
+        
         /// <summary>
         /// Active Kinect sensor
         /// </summary>
@@ -103,6 +113,11 @@ namespace Spooky
         /// Array to store bodies
         /// </summary>
         private Body[] bodies = null;
+
+        /// <summary>
+        /// definition of bones
+        /// </summary>
+        private List<Tuple<JointType, JointType>> bones;
 
         /// <summary>
         /// Number of bodies tracked
@@ -142,20 +157,53 @@ namespace Spooky
         /// <summary>
         /// List of brushes for each face tracked
         /// </summary>
-        private List<Brush> faceBrush;
+        private List<Brush> faceBrush;        
 
-        /// <summary>
-        /// Current status text to display
-        /// </summary>
-        private string statusText = null;
+        private double lookAwayTimer = 0.0;
+        private double lookAtTimer = 0.0;
+        DateTime previousBodyFrameTime;
+        DateTime currentBodyFrameTime;
+
+        Slider slider;
+        Image staticImage;
+
+        public enum Closeness
+        {
+            Close,
+            Medium,
+            Far
+        }
+
+        public Closeness closeness = Closeness.Medium;
 
         /// <summary>
         /// Initializes a new instance of the MainWindow class.
         /// </summary>
         public MainWindow()
         {
+            // initialize the components (controls) of the window
+            this.InitializeComponent();
+            
+            slider = volumeSlider;
+            staticImage = staticGif;
+
+            previousBodyFrameTime = System.DateTime.Now;
+            currentBodyFrameTime = System.DateTime.Now; 
+
             // one sensor is currently supported
             this.kinectSensor = KinectSensor.GetDefault();
+
+            // open the reader for the color frames
+            this.colorFrameReader = this.kinectSensor.ColorFrameSource.OpenReader();
+
+            // wire handler for frame arrival
+            this.colorFrameReader.FrameArrived += this.Reader_ColorFrameArrived;
+
+            // create the colorFrameDescription from the ColorFrameSource using Bgra format
+            FrameDescription colorFrameDescription = this.kinectSensor.ColorFrameSource.CreateFrameDescription(ColorImageFormat.Bgra);
+            
+            // create the bitmap to display
+            this.colorBitmap = new WriteableBitmap(colorFrameDescription.Width, colorFrameDescription.Height, 96.0, 96.0, PixelFormats.Bgr32, null);
 
             // get the coordinate mapper
             this.coordinateMapper = this.kinectSensor.CoordinateMapper;
@@ -170,6 +218,43 @@ namespace Spooky
 
             // open the reader for the body frames
             this.bodyFrameReader = this.kinectSensor.BodyFrameSource.OpenReader();
+
+            // a bone defined as a line between two joints
+            this.bones = new List<Tuple<JointType, JointType>>();
+
+            // Torso
+            this.bones.Add(new Tuple<JointType, JointType>(JointType.Head, JointType.Neck));
+            this.bones.Add(new Tuple<JointType, JointType>(JointType.Neck, JointType.SpineShoulder));
+            this.bones.Add(new Tuple<JointType, JointType>(JointType.SpineShoulder, JointType.SpineMid));
+            this.bones.Add(new Tuple<JointType, JointType>(JointType.SpineMid, JointType.SpineBase));
+            this.bones.Add(new Tuple<JointType, JointType>(JointType.SpineShoulder, JointType.ShoulderRight));
+            this.bones.Add(new Tuple<JointType, JointType>(JointType.SpineShoulder, JointType.ShoulderLeft));
+            this.bones.Add(new Tuple<JointType, JointType>(JointType.SpineBase, JointType.HipRight));
+            this.bones.Add(new Tuple<JointType, JointType>(JointType.SpineBase, JointType.HipLeft));
+
+            // Right Arm
+            this.bones.Add(new Tuple<JointType, JointType>(JointType.ShoulderRight, JointType.ElbowRight));
+            this.bones.Add(new Tuple<JointType, JointType>(JointType.ElbowRight, JointType.WristRight));
+            this.bones.Add(new Tuple<JointType, JointType>(JointType.WristRight, JointType.HandRight));
+            this.bones.Add(new Tuple<JointType, JointType>(JointType.HandRight, JointType.HandTipRight));
+            this.bones.Add(new Tuple<JointType, JointType>(JointType.WristRight, JointType.ThumbRight));
+
+            // Left Arm
+            this.bones.Add(new Tuple<JointType, JointType>(JointType.ShoulderLeft, JointType.ElbowLeft));
+            this.bones.Add(new Tuple<JointType, JointType>(JointType.ElbowLeft, JointType.WristLeft));
+            this.bones.Add(new Tuple<JointType, JointType>(JointType.WristLeft, JointType.HandLeft));
+            this.bones.Add(new Tuple<JointType, JointType>(JointType.HandLeft, JointType.HandTipLeft));
+            this.bones.Add(new Tuple<JointType, JointType>(JointType.WristLeft, JointType.ThumbLeft));
+
+            // Right Leg
+            this.bones.Add(new Tuple<JointType, JointType>(JointType.HipRight, JointType.KneeRight));
+            this.bones.Add(new Tuple<JointType, JointType>(JointType.KneeRight, JointType.AnkleRight));
+            this.bones.Add(new Tuple<JointType, JointType>(JointType.AnkleRight, JointType.FootRight));
+
+            // Left Leg
+            this.bones.Add(new Tuple<JointType, JointType>(JointType.HipLeft, JointType.KneeLeft));
+            this.bones.Add(new Tuple<JointType, JointType>(JointType.KneeLeft, JointType.AnkleLeft));
+            this.bones.Add(new Tuple<JointType, JointType>(JointType.AnkleLeft, JointType.FootLeft));
 
             // wire handler for body frame arrival
             this.bodyFrameReader.FrameArrived += this.Reader_BodyFrameArrived;
@@ -229,12 +314,7 @@ namespace Spooky
             // set the status text
             //this.StatusText = this.kinectSensor.IsAvailable ? Properties.Resources.RunningStatusText
             //                                                : Properties.Resources.NoSensorStatusText;
-
-            // Create the drawing group we'll use for drawing
-            this.drawingGroup = new DrawingGroup();
-
-            // Create an image source that we can use in our image control
-            this.imageSource = new DrawingImage(this.drawingGroup);
+            
 
             // use the window object as the view model in this simple example
             this.DataContext = this;
@@ -244,11 +324,125 @@ namespace Spooky
             player = new MediaPlayer();
             player.Open(uri);
             player.Play();
-            Console.WriteLine("player volume:" + player.Volume.ToString());
+            player.Volume = 1;
+            Debug.WriteLine("player volume:" + player.Volume.ToString());
             player.MediaEnded += Player_MediaEnded;
+            slider.Value = slider.Maximum;
+            slider.ValueChanged += Slider_ValueChanged;
 
-            // initialize the components (controls) of the window
-            this.InitializeComponent();
+            screamUri = new Uri(@screamer_file, UriKind.Relative);
+            screamPlayer = new MediaPlayer();
+            screamPlayer.Open(screamUri);
+            screamPlayer.Volume = 1;
+        }
+
+
+
+        private void handleFaceFrameResults(int faceIndex, FaceFrameResult faceResult)
+        {
+            if (faceResult.FaceProperties != null)
+            {
+                if (faceResult.FaceProperties[FaceProperty.LookingAway] == DetectionResult.Yes
+                    || faceResult.FaceProperties[FaceProperty.LookingAway] == DetectionResult.Maybe
+                    || faceResult.FaceProperties[FaceProperty.LookingAway] == DetectionResult.Unknown)
+                {
+                    lookAtTimer = 0.0;
+                    lookAwayTimer += (currentBodyFrameTime - previousBodyFrameTime).TotalSeconds;
+                    Debug.WriteLine("lookAway:" + lookAwayTimer.ToString());
+                }
+                else
+                {
+                    lookAtTimer += (currentBodyFrameTime - previousBodyFrameTime).TotalSeconds;
+                    if (lookAtTimer >= 0.66)
+                    {
+                        Debug.WriteLine("RESET LOOKAWAY");
+                        lookAwayTimer = 0.0;
+                    }
+
+                    if (lookAtTimer > 7 && closeness == Closeness.Close)
+                    {
+                        // screamer
+                        screamerImage.Opacity = 1;
+
+                        screamerImage.MouseUp += ScreamerImage_MouseUp;
+
+                        screamPlayer.Play();
+
+                        player.Stop();
+                        player.Volume = 0;
+                    }
+                }
+
+                if (lookAwayTimer > 4.0)
+                {
+                    Uri uri = new Uri(@bump_file, UriKind.Relative);
+                    player.MediaEnded -= Player_MediaEnded;
+                    player.Stop();
+                    player.Open(uri);
+                    player.Volume = 1;
+                    staticImage.Opacity = 1;
+                    slider.Value = slider.Maximum;
+                    player.Play();
+                    player.MediaEnded += Player_MediaEnded;
+
+                    lookAwayTimer = 0;
+                }
+            }
+        }
+
+        private void ScreamerImage_MouseUp(object sender, MouseButtonEventArgs e)
+        {
+            // setup default music
+            screamPlayer.Stop();
+            screamerImage.Opacity = 0;
+            screamerImage.MouseUp -= ScreamerImage_MouseUp;
+        }
+
+        private void Slider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+        {
+            // ... Get Slider reference.
+            var slider = sender as Slider;
+            // ... Get Value.
+            double value = slider.Value;
+            player.Volume = value / slider.Maximum;
+            staticImage.Opacity = value / slider.Maximum;
+            magicEye.Opacity = (1 - staticImage.Opacity);
+            Debug.WriteLine("Set Volume: " + player.Volume.ToString());
+        }
+
+        /// <summary>
+        /// Handles the color frame data arriving from the sensor
+        /// </summary>
+        /// <param name="sender">object sending the event</param>
+        /// <param name="e">event arguments</param>
+        private void Reader_ColorFrameArrived(object sender, ColorFrameArrivedEventArgs e)
+        {
+            // ColorFrame is IDisposable
+            using (ColorFrame colorFrame = e.FrameReference.AcquireFrame())
+            {
+                if (colorFrame != null)
+                {
+                    FrameDescription colorFrameDescription = colorFrame.FrameDescription;
+
+                    using (KinectBuffer colorBuffer = colorFrame.LockRawImageBuffer())
+                    {
+                        this.colorBitmap.Lock();
+
+                        // verify data and write the new color frame data to the display bitmap
+                        if ((colorFrameDescription.Width == this.colorBitmap.PixelWidth) && (colorFrameDescription.Height == this.colorBitmap.PixelHeight))
+                        {
+                            colorFrame.CopyConvertedFrameDataToIntPtr(
+                                this.colorBitmap.BackBuffer,
+                                (uint)(colorFrameDescription.Width * colorFrameDescription.Height * 4),
+                                ColorImageFormat.Bgra);
+
+                            this.colorBitmap.AddDirtyRect(new Int32Rect(0, 0, this.colorBitmap.PixelWidth, this.colorBitmap.PixelHeight));
+                        }
+
+                        this.colorBitmap.Unlock();
+                    }
+                }
+            }
         }
 
         /// <summary>
@@ -263,35 +457,10 @@ namespace Spooky
         {
             get
             {
-                return this.imageSource;
+                return this.colorBitmap;
             }
         }
-
-        /// <summary>
-        /// Gets or sets the current status text to display
-        /// </summary>
-        public string StatusText
-        {
-            get
-            {
-                return this.statusText;
-            }
-
-            set
-            {
-                if (this.statusText != value)
-                {
-                    this.statusText = value;
-
-                    // notify any bound elements that the text has changed
-                    if (this.PropertyChanged != null)
-                    {
-                        this.PropertyChanged(this, new PropertyChangedEventArgs("StatusText"));
-                    }
-                }
-            }
-        }
-
+        
         /// <summary>
         /// Converts rotation quaternion to Euler angles 
         /// And then maps them to a specified range of values to control the refresh rate
@@ -327,6 +496,7 @@ namespace Spooky
         /// <param name="e">event arguments</param>
         private void MainWindow_Loaded(object sender, RoutedEventArgs e)
         {
+            Debug.WriteLine("MainWindow_Loaded");
             for (int i = 0; i < this.bodyCount; i++)
             {
                 if (this.faceFrameReaders[i] != null)
@@ -338,6 +508,7 @@ namespace Spooky
 
             if (this.bodyFrameReader != null)
             {
+                Debug.WriteLine("set bodyFrameReader.FrameArrived");
                 // wire handler for body frame arrival
                 this.bodyFrameReader.FrameArrived += this.Reader_BodyFrameArrived;
             }
@@ -438,61 +609,99 @@ namespace Spooky
         /// <param name="e">event arguments</param>
         private void Reader_BodyFrameArrived(object sender, BodyFrameArrivedEventArgs e)
         {
+            this.previousBodyFrameTime = currentBodyFrameTime;
+            this.currentBodyFrameTime = DateTime.Now;
+
+            bool dataReceived = false;
+
             using (var bodyFrame = e.FrameReference.AcquireFrame())
             {
                 if (bodyFrame != null)
                 {
+                    if (this.bodies == null)
+                    {
+                        this.bodies = new Body[bodyFrame.BodyCount];
+                    }
+                    dataReceived = true;
+
                     // update body data
+                    // The first time GetAndRefreshBodyData is called, Kinect will allocate each Body in the array.
+                    // As long as those body objects are not disposed and not set to null in the array,
+                    // those body objects will be re-used.
                     bodyFrame.GetAndRefreshBodyData(this.bodies);
 
-                    using (DrawingContext dc = this.drawingGroup.Open())
+                    bool gotFaceResult = false;
+
+                    // iterate through each face source
+                    for (int i = 0; i < this.bodyCount; i++)
                     {
-                        // draw the dark background
-                        dc.DrawRectangle(Brushes.Black, null, this.displayRect);
-
-                        bool drawFaceResult = false;
-
-                        // iterate through each face source
-                        for (int i = 0; i < this.bodyCount; i++)
+                        // check if a valid face is tracked in this face source
+                        if (this.faceFrameSources[i].IsTrackingIdValid)
                         {
-                            // check if a valid face is tracked in this face source
-                            if (this.faceFrameSources[i].IsTrackingIdValid)
+                            // check if we have valid face frame results
+                            if (this.faceFrameResults[i] != null)
                             {
-                                // check if we have valid face frame results
-                                if (this.faceFrameResults[i] != null)
+                                faceIndicator.Fill = new SolidColorBrush(Colors.Red);
+                                handleFaceFrameResults(i, this.faceFrameResults[i]);
+                                if (!gotFaceResult)
                                 {
-                                    // draw face frame results
-                                    this.DrawFaceFrameResults(i, this.faceFrameResults[i], dc);
-
-                                    if (!drawFaceResult)
-                                    {
-                                        drawFaceResult = true;
-                                    }
-                                }
-                            }
-                            else
-                            {
-                                // check if the corresponding body is tracked 
-                                if (this.bodies[i].IsTracked)
-                                {
-                                    // update the face frame source to track this body
-                                    this.faceFrameSources[i].TrackingId = this.bodies[i].TrackingId;
+                                    gotFaceResult = true;
                                 }
                             }
                         }
-
-                        if (!drawFaceResult)
+                        else
                         {
-                            // if no faces were drawn then this indicates one of the following:
-                            // a body was not tracked 
-                            // a body was tracked but the corresponding face was not tracked
-                            // a body and the corresponding face was tracked though the face box or the face points were not valid
-                            dc.DrawText(
-                                this.textFaceNotTracked,
-                                this.textLayoutFaceNotTracked);
+                            // check if the corresponding body is tracked 
+                            if (this.bodies[i].IsTracked)
+                            {
+                                // update the face frame source to track this body
+                                this.faceFrameSources[i].TrackingId = this.bodies[i].TrackingId;
+                            }
                         }
+                    }
 
-                        this.drawingGroup.ClipGeometry = new RectangleGeometry(this.displayRect);
+                    if (!gotFaceResult)
+                    {
+                        // if no faces were gotten then this indicates one of the following:
+                        // a body was not tracked 
+                        // a body was tracked but the corresponding face was not tracked
+                        // a body and the corresponding face was tracked though the face box or the face points were not valid
+
+                        // if we cant find a face then we can assume the display is not being looked at
+                        //lookAwayTimer += (currentBodyFrameTime - previousBodyFrameTime).TotalSeconds;
+                        //Debug.WriteLine("no face lookAway:" + lookAwayTimer.ToString());
+                        faceIndicator.Fill = new SolidColorBrush(Colors.Orange);
+                    }
+                }
+            }
+
+            if (dataReceived)
+            {
+                foreach (Body body in this.bodies)
+                {
+                    if (body.IsTracked)
+                    {
+                        IReadOnlyDictionary<JointType, Joint> joints = body.Joints;
+                        
+                        if (joints.ContainsKey(JointType.Head))
+                        {
+                            CameraSpacePoint position = joints[JointType.Head].Position;
+                            if (position.Z < 0)
+                            {
+                                position.Z = InferredZPositionClamp;
+                            }
+                            Debug.WriteLine("z:" + position.Z.ToString());
+                            if (position.Z <= 0.68)
+                            {
+                                closeness = Closeness.Close;
+                            } else if (position.Z <= 1)
+                            {
+                                closeness = Closeness.Medium;
+                            } else
+                            {
+                                closeness = Closeness.Far;
+                            }
+                        }
                     }
                 }
             }
