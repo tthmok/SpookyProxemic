@@ -30,6 +30,7 @@ namespace Spooky
         string static_file = "Music/Record_Player_Static.mp3";
         string screamer_file = "Music/inhale_scream.mp3";
         
+        private bool didScaryVolume = false;
         private Uri screamUri;
         MediaPlayer screamPlayer;
 
@@ -373,8 +374,9 @@ namespace Spooky
                     }
                 }
 
-                if (lookAwayTimer > 4.0)
+                if (!didScaryVolume && lookAwayTimer > 4.0)
                 {
+                    didScaryVolume = true;
                     Uri uri = new Uri(@bump_file, UriKind.Relative);
                     player.MediaEnded -= Player_MediaEnded;
                     player.Stop();
