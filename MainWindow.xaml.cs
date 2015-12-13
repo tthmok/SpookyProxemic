@@ -17,6 +17,8 @@ using Microsoft.Kinect.Face;
 using System.ComponentModel;
 using System.Globalization;
 using System.Diagnostics;
+using Phidgets;
+using Phidgets.Events;
 
 namespace Spooky
 {
@@ -25,7 +27,7 @@ namespace Spooky
     /// </summary>
     public partial class MainWindow : Window, INotifyPropertyChanged
     {
-        MediaPlayer player;
+        MediaPlayer staticPlayer;
         string bump_file = "Music/Bump_in_the_Night_Supernatural_Haunting.mp3";
         string static_file = "Music/Record_Player_Static.mp3";
         string screamer_file = "Music/inhale_scream.mp3";
@@ -33,6 +35,36 @@ namespace Spooky
         private bool didScaryVolume = false;
         private Uri screamUri;
         MediaPlayer screamPlayer;
+
+        public const int KnobIndex = 0;
+
+        public InterfaceKit interfaceKit = new InterfaceKit();
+
+        #region properties
+        /// <summary>
+        /// Map depth range to byte range
+        /// </summary>
+        private const int MapDepthToByte = 8000 / 256;
+
+        /// <summary>
+        /// Reader for depth frames
+        /// </summary>
+        private DepthFrameReader depthFrameReader = null;
+
+        /// <summary>
+        /// Description of the data contained in the depth frame
+        /// </summary>
+        private FrameDescription depthFrameDescription = null;
+
+        /// <summary>
+        /// Bitmap to display
+        /// </summary>
+        private WriteableBitmap depthBitmap = null;
+
+        /// <summary>
+        /// Intermediate storage for frame data converted to color
+        /// </summary>
+        private byte[] depthPixels = null;
 
         /// <summary>
         /// Constant for clamping Z values of camera space points from being negative
@@ -164,8 +196,7 @@ namespace Spooky
         private double lookAtTimer = 0.0;
         DateTime previousBodyFrameTime;
         DateTime currentBodyFrameTime;
-
-        Slider slider;
+        
         Image staticImage;
 
         public enum Closeness
@@ -177,6 +208,7 @@ namespace Spooky
 
         public Closeness closeness = Closeness.Medium;
 
+        #endregion
         /// <summary>
         /// Initializes a new instance of the MainWindow class.
         /// </summary>
@@ -184,8 +216,10 @@ namespace Spooky
         {
             // initialize the components (controls) of the window
             this.InitializeComponent();
+
+            interfaceKit.Attach += InterfaceKit_Attach;
+            interfaceKit.open();
             
-            slider = volumeSlider;
             staticImage = staticGif;
 
             previousBodyFrameTime = System.DateTime.Now;
@@ -193,6 +227,22 @@ namespace Spooky
 
             // one sensor is currently supported
             this.kinectSensor = KinectSensor.GetDefault();
+
+            // open the reader for the depth frames
+            this.depthFrameReader = this.kinectSensor.DepthFrameSource.OpenReader();
+
+            // wire handler for frame arrival
+            this.depthFrameReader.FrameArrived += this.Reader_FrameArrived;
+
+            // get FrameDescription from DepthFrameSource
+            this.depthFrameDescription = this.kinectSensor.DepthFrameSource.FrameDescription;
+
+            // allocate space to put the pixels being received and converted
+            this.depthPixels = new byte[this.depthFrameDescription.Width * this.depthFrameDescription.Height];
+
+            // create the bitmap to display
+            this.depthBitmap = new WriteableBitmap(this.depthFrameDescription.Width, this.depthFrameDescription.Height, 96.0, 96.0, PixelFormats.Gray8, null);
+
 
             // open the reader for the color frames
             this.colorFrameReader = this.kinectSensor.ColorFrameSource.OpenReader();
@@ -321,22 +371,137 @@ namespace Spooky
             this.DataContext = this;
 
             // setup default music
-            Uri uri = new Uri(@static_file, UriKind.Relative);
-            player = new MediaPlayer();
-            player.Open(uri);
-            player.Play();
-            player.Volume = 1;
-            Debug.WriteLine("player volume:" + player.Volume.ToString());
-            player.MediaEnded += Player_MediaEnded;
-            slider.Value = slider.Maximum;
-            slider.ValueChanged += Slider_ValueChanged;
-
             screamUri = new Uri(@screamer_file, UriKind.Relative);
             screamPlayer = new MediaPlayer();
             screamPlayer.Open(screamUri);
             screamPlayer.Volume = 1;
         }
 
+        private bool attachedInterfaceKit = false;
+        private void InterfaceKit_Attach(object sender, AttachEventArgs e)
+        {
+            Debug.WriteLine("InterfaceKit_Attach");
+            if (!attachedInterfaceKit)
+            {
+                attachedInterfaceKit = true;
+
+                var startKnobValue = interfaceKit.sensors[KnobIndex].Value;
+                updateFromKnobValue(startKnobValue);
+
+                Uri uri = new Uri(@static_file, UriKind.Relative);
+                staticPlayer = new MediaPlayer();
+                staticPlayer.Open(uri);
+                staticPlayer.Play();
+                staticPlayer.MediaEnded += Player_MediaEnded;                
+
+                interfaceKit.SensorChange += InterfaceKit_SensorChange;
+            }
+        }
+
+        private void InterfaceKit_SensorChange(object sender, SensorChangeEventArgs e)
+        {
+            if (e.Index == KnobIndex)
+            {
+                Debug.WriteLine("Knob change: " + e.Value);
+                updateFromKnobValue(e.Value);
+            }
+        }
+
+        private void updateFromKnobValue(double val)
+        {
+            Application.Current.Dispatcher.Invoke(new Action(() =>
+            {
+                // ... Get Value.
+                double normalVal = 1 - (val / 1000.0);
+                Debug.WriteLine("normalVal: " + normalVal.ToString());
+                //staticPlayer.Volume = normalVal;
+
+                staticImage.Opacity = normalVal;
+                magicEye.Opacity = (1 - staticImage.Opacity);
+                Debug.WriteLine("Set Volume: " + normalVal.ToString());
+            }));
+        }
+
+        /// <summary>
+        /// Handles the depth frame data arriving from the sensor
+        /// </summary>
+        /// <param name="sender">object sending the event</param>
+        /// <param name="e">event arguments</param>
+        private void Reader_FrameArrived(object sender, DepthFrameArrivedEventArgs e)
+        {
+            bool depthFrameProcessed = false;
+
+            using (DepthFrame depthFrame = e.FrameReference.AcquireFrame())
+            {
+                if (depthFrame != null)
+                {
+                    // the fastest way to process the body index data is to directly access 
+                    // the underlying buffer
+                    using (Microsoft.Kinect.KinectBuffer depthBuffer = depthFrame.LockImageBuffer())
+                    {
+                        // verify data and write the color data to the display bitmap
+                        if (((this.depthFrameDescription.Width * this.depthFrameDescription.Height) == (depthBuffer.Size / this.depthFrameDescription.BytesPerPixel)) &&
+                            (this.depthFrameDescription.Width == this.depthBitmap.PixelWidth) && (this.depthFrameDescription.Height == this.depthBitmap.PixelHeight))
+                        {
+                            // Note: In order to see the full range of depth (including the less reliable far field depth)
+                            // we are setting maxDepth to the extreme potential depth threshold
+                            ushort maxDepth = ushort.MaxValue;
+
+                            // If you wish to filter by reliable depth distance, uncomment the following line:
+                            //// maxDepth = depthFrame.DepthMaxReliableDistance
+
+                            this.ProcessDepthFrameData(depthBuffer.UnderlyingBuffer, depthBuffer.Size, depthFrame.DepthMinReliableDistance, maxDepth);
+                            depthFrameProcessed = true;
+                        }
+                    }
+                }
+            }
+
+            if (depthFrameProcessed)
+            {
+                this.RenderDepthPixels();
+            }
+        }
+
+
+        /// <summary>
+        /// Directly accesses the underlying image buffer of the DepthFrame to 
+        /// create a displayable bitmap.
+        /// This function requires the /unsafe compiler option as we make use of direct
+        /// access to the native memory pointed to by the depthFrameData pointer.
+        /// </summary>
+        /// <param name="depthFrameData">Pointer to the DepthFrame image data</param>
+        /// <param name="depthFrameDataSize">Size of the DepthFrame image data</param>
+        /// <param name="minDepth">The minimum reliable depth value for the frame</param>
+        /// <param name="maxDepth">The maximum reliable depth value for the frame</param>
+        private unsafe void ProcessDepthFrameData(IntPtr depthFrameData, uint depthFrameDataSize, ushort minDepth, ushort maxDepth)
+        {
+            // depth frame data is a 16 bit value
+            ushort* frameData = (ushort*)depthFrameData;
+
+            // convert depth to a visual representation
+            for (int i = 0; i < (int)(depthFrameDataSize / this.depthFrameDescription.BytesPerPixel); ++i)
+            {
+                // Get the depth for this pixel
+                ushort depth = frameData[i];
+
+                // To convert to a byte, we're mapping the depth value to the byte range.
+                // Values outside the reliable depth range are mapped to 0 (black).
+                this.depthPixels[i] = (byte)(depth >= minDepth && depth <= maxDepth ? (depth / MapDepthToByte) : 0);
+            }
+        }
+
+        /// <summary>
+        /// Renders color pixels into the writeableBitmap.
+        /// </summary>
+        private void RenderDepthPixels()
+        {
+            this.depthBitmap.WritePixels(
+                new Int32Rect(0, 0, this.depthBitmap.PixelWidth, this.depthBitmap.PixelHeight),
+                this.depthPixels,
+                this.depthBitmap.PixelWidth,
+                0);
+        }
 
 
         private void handleFaceFrameResults(int faceIndex, FaceFrameResult faceResult)
@@ -349,14 +514,14 @@ namespace Spooky
                 {
                     lookAtTimer = 0.0;
                     lookAwayTimer += (currentBodyFrameTime - previousBodyFrameTime).TotalSeconds;
-                    Debug.WriteLine("lookAway:" + lookAwayTimer.ToString());
+                    //Debug.WriteLine("lookAway:" + lookAwayTimer.ToString());
                 }
                 else
                 {
                     lookAtTimer += (currentBodyFrameTime - previousBodyFrameTime).TotalSeconds;
                     if (lookAtTimer >= 0.66)
                     {
-                        Debug.WriteLine("RESET LOOKAWAY");
+                        //Debug.WriteLine("RESET LOOKAWAY");
                         lookAwayTimer = 0.0;
                     }
 
@@ -369,8 +534,8 @@ namespace Spooky
 
                         screamPlayer.Play();
 
-                        player.Stop();
-                        player.Volume = 0;
+                        staticPlayer.Stop();
+                        staticPlayer.Volume = 0;
                     }
                 }
 
@@ -378,14 +543,13 @@ namespace Spooky
                 {
                     didScaryVolume = true;
                     Uri uri = new Uri(@bump_file, UriKind.Relative);
-                    player.MediaEnded -= Player_MediaEnded;
-                    player.Stop();
-                    player.Open(uri);
-                    player.Volume = 1;
+                    staticPlayer.MediaEnded -= Player_MediaEnded;
+                    staticPlayer.Stop();
+                    staticPlayer.Open(uri);
+                    staticPlayer.Volume = 1;
                     staticImage.Opacity = 1;
-                    slider.Value = slider.Maximum;
-                    player.Play();
-                    player.MediaEnded += Player_MediaEnded;
+                    staticPlayer.Play();
+                    staticPlayer.MediaEnded += Player_MediaEnded;
 
                     lookAwayTimer = 0;
                 }
@@ -399,19 +563,7 @@ namespace Spooky
             screamerImage.Opacity = 0;
             screamerImage.MouseUp -= ScreamerImage_MouseUp;
         }
-
-        private void Slider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
-        {
-            // ... Get Slider reference.
-            var slider = sender as Slider;
-            // ... Get Value.
-            double value = slider.Value;
-            player.Volume = value / slider.Maximum;
-            staticImage.Opacity = value / slider.Maximum;
-            magicEye.Opacity = (1 - staticImage.Opacity);
-            Debug.WriteLine("Set Volume: " + player.Volume.ToString());
-        }
-
+        
         /// <summary>
         /// Handles the color frame data arriving from the sensor
         /// </summary>
@@ -461,6 +613,11 @@ namespace Spooky
             {
                 return this.colorBitmap;
             }
+        }
+
+        public ImageSource DepthImageSource
+        {
+            get { return this.depthBitmap; }
         }
         
         /// <summary>
@@ -692,7 +849,7 @@ namespace Spooky
                             {
                                 position.Z = InferredZPositionClamp;
                             }
-                            Debug.WriteLine("z:" + position.Z.ToString());
+                            //Debug.WriteLine("z:" + position.Z.ToString());
                             if (position.Z <= 0.68)
                             {
                                 closeness = Closeness.Close;
@@ -886,9 +1043,9 @@ namespace Spooky
 
         private void Player_MediaEnded(object sender, EventArgs e)
         {
-            player.Pause();
-            player.Position = TimeSpan.Zero;
-            player.Play();
+            staticPlayer.Pause();
+            staticPlayer.Position = TimeSpan.Zero;
+            staticPlayer.Play();
 
         }
     }
