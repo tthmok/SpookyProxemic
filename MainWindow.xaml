@@ -21,10 +21,10 @@
         </Viewbox>
 
         <Viewbox HorizontalAlignment="Center" Height="768" Width="1366">
-            <Image x:Name="DepthImage" Source="{Binding DepthImageSource}" Height="768" Width="1366" />
+            <Image x:Name="DepthImage" Source="{Binding DepthImageSource}" Height="768" Width="1366" Opacity="0.4" />
         </Viewbox>
 
-        <Image x:Name="staticGif" gif:ImageBehavior.AnimatedSource="Images/static_1.gif" Height="768" Width="1366" Stretch="UniformToFill" />
+        <Image x:Name="staticGif" gif:ImageBehavior.AnimatedSource="Images/static_1.gif" Height="768" Width="1366" Stretch="UniformToFill" Visibility="Hidden" />
 
         <Image x:Name="magicEye" Height="309" Canvas.Top="387" Width="452" Source="Images/magic_eye_bird.jpg" Opacity="0.05" Canvas.Left="464"/>
         <Ellipse x:Name="faceIndicator" Fill="#FFFFA200" Height="70" Canvas.Left="938" Stroke="Black" Canvas.Top="10" Width="70"/>

@@ -27,11 +27,13 @@ namespace Spooky
     /// </summary>
     public partial class MainWindow : Window, INotifyPropertyChanged
     {
-        MediaPlayer staticPlayer;
+        MediaPlayer staticListenPlayer;
+        MediaPlayer staticLookPlayer;
         string bump_file = "Music/Bump_in_the_Night_Supernatural_Haunting.mp3";
-        string static_file = "Music/Record_Player_Static.mp3";
         string screamer_file = "Music/inhale_scream.mp3";
-        
+        string static_listen_file = "Music/listen_static.mp3";
+        string static_look_file = "Music/look_static.mp3";
+
         private bool didScaryVolume = false;
         private Uri screamUri;
         MediaPlayer screamPlayer;
@@ -197,8 +199,6 @@ namespace Spooky
         DateTime previousBodyFrameTime;
         DateTime currentBodyFrameTime;
         
-        Image staticImage;
-
         public enum Closeness
         {
             Close,
@@ -220,8 +220,6 @@ namespace Spooky
             interfaceKit.Attach += InterfaceKit_Attach;
             interfaceKit.open();
             
-            staticImage = staticGif;
-
             previousBodyFrameTime = System.DateTime.Now;
             currentBodyFrameTime = System.DateTime.Now; 
 
@@ -255,6 +253,7 @@ namespace Spooky
             
             // create the bitmap to display
             this.colorBitmap = new WriteableBitmap(colorFrameDescription.Width, colorFrameDescription.Height, 96.0, 96.0, PixelFormats.Bgr32, null);
+            //this.depthBitmap = new WriteableBitmap(colorFrameDescription.Width, colorFrameDescription.Height, 96.0, 96.0, PixelFormats.Bgr32, null);
 
             // get the coordinate mapper
             this.coordinateMapper = this.kinectSensor.CoordinateMapper;
@@ -375,6 +374,21 @@ namespace Spooky
             screamPlayer = new MediaPlayer();
             screamPlayer.Open(screamUri);
             screamPlayer.Volume = 1;
+
+            Uri uri = new Uri(static_listen_file, UriKind.Relative);
+            staticListenPlayer = new MediaPlayer();
+            staticListenPlayer.Open(uri);
+            staticListenPlayer.Play();
+            staticListenPlayer.MediaEnded += Player_MediaEnded;
+
+            Uri lookUri = new Uri(static_look_file, UriKind.Relative);
+            staticLookPlayer = new MediaPlayer();
+            staticLookPlayer.Volume = 0;
+            staticLookPlayer.Open(lookUri);
+            staticLookPlayer.Play();
+            staticLookPlayer.MediaEnded += StaticLookPlayer_MediaEnded;
+
+            magicEye.Opacity = 0;
         }
 
         private bool attachedInterfaceKit = false;
@@ -387,15 +401,16 @@ namespace Spooky
 
                 var startKnobValue = interfaceKit.sensors[KnobIndex].Value;
                 updateFromKnobValue(startKnobValue);
-
-                Uri uri = new Uri(@static_file, UriKind.Relative);
-                staticPlayer = new MediaPlayer();
-                staticPlayer.Open(uri);
-                staticPlayer.Play();
-                staticPlayer.MediaEnded += Player_MediaEnded;                
-
+                
                 interfaceKit.SensorChange += InterfaceKit_SensorChange;
             }
+        }
+
+        private void StaticLookPlayer_MediaEnded(object sender, EventArgs e)
+        {
+            staticLookPlayer.Pause();
+            staticLookPlayer.Position = TimeSpan.Zero;
+            staticLookPlayer.Play();
         }
 
         private void InterfaceKit_SensorChange(object sender, SensorChangeEventArgs e)
@@ -416,8 +431,10 @@ namespace Spooky
                 Debug.WriteLine("normalVal: " + normalVal.ToString());
                 //staticPlayer.Volume = normalVal;
 
-                staticImage.Opacity = normalVal;
-                magicEye.Opacity = (1 - staticImage.Opacity);
+                staticLookPlayer.Volume = 1 - normalVal;
+                staticListenPlayer.Volume = normalVal;
+                
+                magicEye.Opacity = 1 - normalVal;
                 Debug.WriteLine("Set Volume: " + normalVal.ToString());
             }));
         }
@@ -512,6 +529,22 @@ namespace Spooky
                     || faceResult.FaceProperties[FaceProperty.LookingAway] == DetectionResult.Maybe
                     || faceResult.FaceProperties[FaceProperty.LookingAway] == DetectionResult.Unknown)
                 {
+                    if (closeness == Closeness.Far)
+                    {
+                        DepthImage.Opacity = 0.65;
+                    } else
+                    {
+                        DepthImage.Opacity = 0;
+                    }
+                } else
+                {
+                    DepthImage.Opacity = 0;
+                }
+
+                if (faceResult.FaceProperties[FaceProperty.LookingAway] == DetectionResult.Yes
+                    || faceResult.FaceProperties[FaceProperty.LookingAway] == DetectionResult.Maybe
+                    || faceResult.FaceProperties[FaceProperty.LookingAway] == DetectionResult.Unknown)
+                {
                     lookAtTimer = 0.0;
                     lookAwayTimer += (currentBodyFrameTime - previousBodyFrameTime).TotalSeconds;
                     //Debug.WriteLine("lookAway:" + lookAwayTimer.ToString());
@@ -534,25 +567,27 @@ namespace Spooky
 
                         screamPlayer.Play();
 
-                        staticPlayer.Stop();
-                        staticPlayer.Volume = 0;
+                        staticListenPlayer.Stop();
+                        staticListenPlayer.Volume = 0;
                     }
                 }
 
-                if (!didScaryVolume && lookAwayTimer > 4.0)
+                if (!didScaryVolume && lookAwayTimer > 4.0 && closeness == Closeness.Far)
                 {
                     didScaryVolume = true;
                     Uri uri = new Uri(@bump_file, UriKind.Relative);
-                    staticPlayer.MediaEnded -= Player_MediaEnded;
-                    staticPlayer.Stop();
-                    staticPlayer.Open(uri);
-                    staticPlayer.Volume = 1;
-                    staticImage.Opacity = 1;
-                    staticPlayer.Play();
-                    staticPlayer.MediaEnded += Player_MediaEnded;
+                    staticListenPlayer.MediaEnded -= Player_MediaEnded;
+                    staticListenPlayer.Stop();
+                    staticListenPlayer.Open(uri);
+                    staticListenPlayer.Volume = 1;
+                    staticListenPlayer.Play();
+                    staticListenPlayer.MediaEnded += Player_MediaEnded;
 
                     lookAwayTimer = 0;
                 }
+            } else
+            {
+                DepthImage.Opacity = 0;
             }
         }
 
@@ -1043,10 +1078,9 @@ namespace Spooky
 
         private void Player_MediaEnded(object sender, EventArgs e)
         {
-            staticPlayer.Pause();
-            staticPlayer.Position = TimeSpan.Zero;
-            staticPlayer.Play();
-
+            staticListenPlayer.Pause();
+            staticListenPlayer.Position = TimeSpan.Zero;
+            staticListenPlayer.Play();
         }
     }
 
