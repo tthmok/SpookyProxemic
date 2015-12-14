@@ -572,7 +572,7 @@ namespace Spooky
                     }
                 }
 
-                if (!didScaryVolume && lookAwayTimer > 4.0 && closeness == Closeness.Far)
+                if (!didScaryVolume && lookAwayTimer > 3.6 && closeness == Closeness.Far && magicEye.Opacity > 0.5)
                 {
                     didScaryVolume = true;
                     Uri uri = new Uri(@bump_file, UriKind.Relative);
