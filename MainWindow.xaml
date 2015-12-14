@@ -21,7 +21,7 @@
         </Viewbox>
 
         <Viewbox HorizontalAlignment="Center" Height="768" Width="1366">
-            <Image x:Name="DepthImage" Source="{Binding DepthImageSource}" Height="768" Width="1366" Opacity="0.4" />
+            <Image x:Name="DepthImage" Source="{Binding DepthImageSource}" Height="768" Width="1366" Opacity="0" />
         </Viewbox>
 
         <Image x:Name="staticGif" gif:ImageBehavior.AnimatedSource="Images/static_1.gif" Height="768" Width="1366" Stretch="UniformToFill" Visibility="Hidden" />

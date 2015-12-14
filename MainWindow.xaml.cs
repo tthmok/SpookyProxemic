@@ -525,6 +525,11 @@ namespace Spooky
         {
             if (faceResult.FaceProperties != null)
             {
+                if (closeness == Closeness.Close)
+                {
+                    faceIndicator.Fill = new SolidColorBrush(Colors.Black);
+                }
+                
                 if (faceResult.FaceProperties[FaceProperty.LookingAway] == DetectionResult.Yes
                     || faceResult.FaceProperties[FaceProperty.LookingAway] == DetectionResult.Maybe
                     || faceResult.FaceProperties[FaceProperty.LookingAway] == DetectionResult.Unknown)
