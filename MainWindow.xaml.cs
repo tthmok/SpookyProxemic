@@ -19,6 +19,7 @@ using System.Globalization;
 using System.Diagnostics;
 using Phidgets;
 using Phidgets.Events;
+using NetworkItWPF;
 
 namespace Spooky
 {
@@ -27,6 +28,11 @@ namespace Spooky
     /// </summary>
     public partial class MainWindow : Window, INotifyPropertyChanged
     {
+        Client client;
+        string username = "totally_a_name";
+        string address = "581.cpsc.ucalgary.ca";
+        int port = 8000;
+
         MediaPlayer staticListenPlayer;
         MediaPlayer staticLookPlayer;
         string bump_file = "Music/Bump_in_the_Night_Supernatural_Haunting.mp3";
@@ -389,6 +395,27 @@ namespace Spooky
             staticLookPlayer.MediaEnded += StaticLookPlayer_MediaEnded;
 
             magicEye.Opacity = 0;
+
+            client = new Client(username, address, port);
+
+            client.Connected += Client_Connected;
+            client.Error += Client_Error;
+            client.MessageReceived += Client_MessageReceived;
+        }
+
+        async private void Client_MessageReceived(object sender, NetworkItMessageEventArgs e)
+        {
+
+        }
+
+        private void Client_Error(object sender, EventArgs e)
+        {
+            throw new Exception();
+        }
+
+        private void Client_Connected(object sender, EventArgs e)
+        {
+            Console.WriteLine("Connected to server");
         }
 
         private bool attachedInterfaceKit = false;
